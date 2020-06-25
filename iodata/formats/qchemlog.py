@@ -39,24 +39,31 @@ PATTERNS = ['*.qchemlog']
 def load_one(lit: LineIterator) -> dict:
     """Do not edit this docstring. It will be overwritten."""
     data = load_qchemlog_low(lit)
-    result_labels = ['atcoords', 'hessian', 'atmasses', 'atnums',
+    result_labels = ['atcoords', 'atmasses', 'atnums','charge',
                      'charge', 'energy', 'g_rot', 'run_type']
     result = {label: data.get(label, None) for label in result_labels}
     # build molecular orbitals
     # todo: double check if this is right
     # mo_energies
-    if not data['unrestricted']:
-        mo_energies = np.concatenate(
-            (data['alpha_mo_occupied'], data['alpha_mo_unoccupied']), axis=0)
-        mo = MolecularOrbitals("restricted", data['norba'], data['norba'],
-                               None, None, mo_energies, None)
-    else:
-        mo_energies = np.concatenate(
-            (data['alpha_mo_occupied'], data['alpha_mo_unoccupied'],
-             data['beta_mo_occupied'], data['beta_mo_unoccupied']), axis=0)
-        mo = MolecularOrbitals("unrestricted", data['norba'], data['norbb'],
-                               None, None, mo_energies, None)
-    result['mo'] = mo
+    # # restricted case
+    # if not data['unrestricted']:
+    #     mo_energies = np.concatenate(
+    #         (data['alpha_mo_occupied'], data['alpha_mo_unoccupied']), axis=0)
+    #     mo_coeffs = np.empty((data['nbasis'], data['norba'])) * np.nan
+    #     mo_occs = np.zeros(mo_coeffs.shape[1]) * np.nan
+    #     mo = MolecularOrbitals("restricted", data['norba'], data['norba'],
+    #                            mo_occs, mo_coeffs, mo_energies, None)
+    # # unrestricted case
+    # else:
+    #     mo_energies = np.concatenate(
+    #         (data['alpha_mo_occupied'], data['alpha_mo_unoccupied'],
+    #          data['beta_mo_occupied'], data['beta_mo_unoccupied']), axis=0)
+    #     mo_coeffs = np.empty((data['nbasis'], data['norba']+data['norbb'])) * np.nan
+    #     mo_occs = np.zeros(mo_coeffs.shape[1]) * np.nan
+    #     mo = MolecularOrbitals("unrestricted", data['norba'], data['norbb'],
+    #                            mo_occs, mo_coeffs, mo_energies, None)
+    # result['mo'] = mo
+
     result['lot'] = data['method']
     result['nelec'] = data['alpha_elec'] + data['beta_elec']
     result['obasis_name'] = data['basis_set'].lower()
@@ -64,16 +71,16 @@ def load_one(lit: LineIterator) -> dict:
     moments_labels = ['dipole_moment', 'quadrupole_moments', 'dipole_tol']
     moments = {label: data.get(label, None) for label in moments_labels}
     # extra information
-    # convert kcal/mol to atomic units
-    enthalpy_dict = {k: v * kcalmol for k, v in data['enthalpy_dict'].items()}
-    # todo: unit conversions for entropy
-    result['enthalpy_dict'] = enthalpy_dict
-    extra_labels = ['spin_multi', 'nuclear_repulsion_energy',
-                    'mulliken_charges', 'polarizability_tensor',
-                    'imaginary_freq', 'vib_energy', '', 'entropy_dict']
+    extra_labels = ['spin_multi', 'nuclear_repulsion_energy', 'nbasis', 'charge',
+                    'mulliken_charges', 'polarizability_tensor', 'hessian',
+                    'imaginary_freq', 'vib_energy', 'entropy_dict']
     extra = {label: data.get(label, None) for label in extra_labels}
     # unit conversions for vibrational energy
     extra['vib_energy'] = extra.get('vib_energy') * kcalmol
+    # convert kcal/mol to atomic units
+    enthalpy_dict = {k: v * kcalmol for k, v in data['enthalpy_dict'].items()}
+    # todo: unit conversions for entropy
+    extra['enthalpy_dict'] = enthalpy_dict
     extra['moments'] = moments
     result['extra'] = extra
     return result
@@ -100,10 +107,9 @@ def load_qchemlog_low(lit: LineIterator) -> dict:
               data['unrestricted'], data['symm'] = _helper_job(lit)
         # standard nuclear orientation
         elif line.startswith('Standard Nuclear Orientation (Angstroms)'):
-            # atnums, alpha_elec, beta_elec, nuclear_repulsion_energy, energy, atcoords = \
-            #     _helper_electron(lit)
-            _, data['alpha_elec'], data['beta_elec'], data['nuclear_repulsion_energy'], \
-              data['energy'], _ = _helper_electron(lit)
+            # atnums, alpha_elec, beta_elec, nbasis, nuclear_replusion_energy, energy, atcoords
+            _, data['alpha_elec'], data['beta_elec'], data['nbasis'], \
+              data['nuclear_repulsion_energy'], data['energy'], _ = _helper_electron(lit)
         # orbital energies
         elif line.startswith('Orbital Energies (a.u.)'):
             data['alpha_mo_occupied'], data['beta_mo_occupied'], data['alpha_mo_unoccupied'], \
@@ -196,12 +202,15 @@ def _helper_electron(lit: LineIterator) -> Tuple:
     nuclear_replusion_energy = float(next(lit).strip().split()[-2])
     # number of num alpha electron and beta elections
     alpha_elec, beta_elec = [int(i) for i in re.findall(r'\d', next(lit).strip())]
+    # number of basis
+    next(lit)
+    nbasis = int(next(lit).strip().split()[-3])
     # total energy
     for line in lit:
         if line.strip().startswith('Total energy in the final basis set'):
             break
     energy = float(line.strip().split()[-1])
-    return atnums, alpha_elec, beta_elec, nuclear_replusion_energy, energy, atcoords
+    return atnums, alpha_elec, beta_elec, nbasis, nuclear_replusion_energy, energy, atcoords
 
 
 def _helper_orbital_energies(lit: LineIterator) -> Tuple:
